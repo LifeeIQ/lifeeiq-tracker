@@ -266,56 +266,28 @@
     </div>
 
     <script>
-        const tg = window.Telegram.WebApp;
-        tg.expand();
-        tg.ready();
+    const tg = window.Telegram.WebApp;
+    tg.expand();
+    
+    // При загрузке тянем данные с сервера
+    fetch('https://LifeeIQ.pythonanywhere.com/get_data')
+        .then(res => res.json())
+        .then(data => {
+            document.getElementById('balance').innerText = data.balance.toFixed(2) + ' ₽';
+        });
 
-        if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
-            document.getElementById('username').innerText = tg.initDataUnsafe.user.first_name.toUpperCase();
-        }
-
-        // --- ФУНКЦИЯ ОТПРАВКИ ДАННЫХ НА PYTHONANYWHERE ---
-        async function addShift() {
-            const hours = prompt("⏱ Введите часы за смену (например, 8):");
-            if (!hours) return;
-            
-            const earned = prompt("💰 Введите заработанную сумму (руб):");
-            if (!earned) return;
-            
-            // Анимация отправки на кнопке Телеграма
-            tg.MainButton.setText("Сэр, отправляю данные...");
-            tg.MainButton.show();
-            
-            try {
-                // Шлем запрос на твой бэкенд в облако!
-                const response = await fetch('https://LifeeIQ.pythonanywhere.com/add_shift', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        hours: parseFloat(hours),
-                        earned: parseFloat(earned),
-                        date: new Date().toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
-                    })
-                });
-                
-                const result = await response.json();
-                if (result.status === 'success') {
-                    tg.showAlert(`Успешно, босс! Смена на сумму ${earned} ₽ записана в базу.`);
-                    
-                    // Обновляем визуальные цифры на экране прямо сейчас
-                    document.getElementById('balance').innerText = `${parseFloat(earned).toLocaleString()}.00 ₽`;
-                    document.getElementById('hours').innerText = `${parseFloat(hours)} ч.`;
-                } else {
-                    tg.showAlert('Сервер вернул ошибку при сохранении!');
-                }
-            } catch (e) {
-                tg.showAlert('Сбой связи с сервером: ' + e);
-            } finally {
-                tg.MainButton.hide(); // Прячем кнопку загрузки
-            }
-        }
+    async function addShift() {
+        const hours = prompt("⏱ Часы:");
+        const earned = prompt("💰 Рубли:");
+        if (!hours || !earned) return;
+        
+        await fetch('https://LifeeIQ.pythonanywhere.com/add_shift', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ hours, earned, date: 'сегодня' })
+        });
+        location.reload(); // Перезагрузка страницы, чтобы обновить баланс
+    }
     </script>
 </body>
 </html>
