@@ -264,7 +264,6 @@
         tg.expand();
         tg.ready();
 
-        // Безопасная функция показа уведомлений (ТГ или обычный браузер)
         function safeAlert(msg) {
             if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.showAlert) {
                 window.Telegram.WebApp.showAlert(msg);
@@ -313,6 +312,9 @@
             const desc = prompt("📍 Название объекта:");
             if (!hours || !earned || !desc) return;
 
+            tg.MainButton.setText("ОТПРАВКА...");
+            tg.MainButton.show();
+
             try {
                 const response = await fetch('https://lifeeiq.pythonanywhere.com/add_shift', {
                     method: 'POST',
@@ -320,23 +322,31 @@
                     body: JSON.stringify({
                         hours: parseFloat(hours),
                         earned: parseFloat(earned),
-                        desc: desc, // ТАК ЖЕ КАК В PYTHON КОДЕ!
+                        desc: desc,
                         date: new Date().toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
                     })
                 });
-                const res = await response.json();
-                if (res.status === 'success') {
+                
+                const text = await response.text();
+                if (response.ok) {
                     safeAlert("✅ Данные сохранены!");
-                    loadData(); // Моментально обновляем экран
+                    loadData();
+                } else {
+                    safeAlert("Ошибка сервера: " + text);
                 }
             } catch (e) {
-                safeAlert("Ошибка сохранения: " + e);
+                safeAlert("Ошибка сети: " + e.message);
+            } finally {
+                tg.MainButton.hide();
             }
         }
 
         async function requestWithdrawal() {
             const amount = prompt("💵 Какую сумму поставить на вывод?");
             if (!amount) return;
+
+            tg.MainButton.setText("ОТПРАВКА ЗАПРОСА...");
+            tg.MainButton.show();
 
             try {
                 const response = await fetch('https://lifeeiq.pythonanywhere.com/request_withdrawal', {
@@ -347,13 +357,18 @@
                         date: new Date().toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
                     })
                 });
-                const res = await response.json();
-                if (res.status === 'success') {
+                
+                const text = await response.text();
+                if (response.ok) {
                     safeAlert("⏳ Запрос отправлен!");
-                    loadData(); // Моментально обновляем экран
+                    loadData();
+                } else {
+                    safeAlert("Ошибка сервера: " + text);
                 }
             } catch (e) {
-                safeAlert("Ошибка вывода: " + e);
+                safeAlert("Ошибка сети: " + e.message);
+            } finally {
+                tg.MainButton.hide();
             }
         }
 
