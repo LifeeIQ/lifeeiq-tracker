@@ -167,8 +167,20 @@
         }
 
         .btn-delete {
-            background: rgba(239, 68, 68, 0.1);
-            border: 1px solid #ef4444;
+            background: rgba(239, 68, 68, 0.08);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #fb7185;
+        }
+
+        .btn-confirm {
+            background: rgba(16, 185, 129, 0.15);
+            border: 1px solid rgba(16, 185, 129, 0.4);
+            color: #10b981;
+            padding: 6px 12px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 700;
+            cursor: pointer;
         }
 
         .btn:active {
@@ -192,7 +204,7 @@
         }
 
         .history-item {
-            background: rgba(255, 255, 255, 0.01);
+            background: rgba(255, 255, 255, 0.015);
             border-radius: 20px;
             padding: 16px 20px;
             display: flex;
@@ -204,6 +216,7 @@
         .history-info {
             display: flex;
             flex-direction: column;
+            gap: 2px;
         }
 
         .history-desc {
@@ -215,13 +228,28 @@
         .history-date {
             font-size: 11px;
             color: rgba(255, 255, 255, 0.3);
-            margin-top: 4px;
         }
 
         .history-amount {
             font-size: 15px;
             font-weight: 700;
+            text-align: right;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 6px;
+        }
+
+        .amount-plus {
             color: #00f0ff;
+        }
+
+        .amount-minus {
+            color: #fb7185;
+        }
+
+        .amount-pending {
+            color: #fbbf24;
         }
     </style>
 </head>
@@ -246,7 +274,7 @@
                 <div class="stat-value" id="hours">0 ч.</div>
             </div>
             <div class="glass-card stat-card">
-                <div class="stat-label">На согласовании</div>
+                <div class="stat-label">Ожидание</div>
                 <div class="stat-value" id="pending" style="color: #fbbf24;">0 ₽</div>
             </div>
         </div>
@@ -257,13 +285,13 @@
         <button class="btn btn-secondary" onclick="requestWithdrawal()">
             💵 Вывести зарплату
         </button>
-        <button class="btn btn-secondary btn-delete" style="margin-top: 10px;" onclick="deleteLast()">
+        <button class="btn btn-delete" onclick="deleteLastShift()">
             🗑 Удалить последнюю смену
         </button>
 
-        <div class="section-title">История смен</div>
+        <div class="section-title">История операций</div>
         <div class="history-section" id="history">
-            <!-- Сюда вставляются смены из базы -->
+            <!-- Динамическая история -->
         </div>
     </div>
 
@@ -272,6 +300,7 @@
         tg.expand();
         tg.ready();
 
+        // Безопасное всплывающее окно
         function safeAlert(msg) {
             if (window.Telegram && tg.showAlert) {
                 tg.showAlert(msg);
@@ -280,46 +309,130 @@
             }
         }
 
-        async function loadData() {
+        // --- ИНИЦИАЛИЗАЦИЯ И ЧТЕНИЕ LOCALSTORAGE ---
+        function getShifts() {
+            return JSON.parse(localStorage.getItem('lifeeiq_shifts')) || [];
+        }
+
+        function getWithdrawals() {
+            return JSON.parse(localStorage.getItem('lifeeiq_withdrawals')) || [];
+        }
+
+        function saveShifts(data) {
+            localStorage.setItem('lifeeiq_shifts', JSON.stringify(data));
+        }
+
+        function saveWithdrawals(data) {
+            localStorage.setItem('lifeeiq_withdrawals', JSON.stringify(data));
+        }
+
+        // --- РАСЧЕТ И ОТРИСОВКА ЭКРАНА ---
+        function loadData() {
             try {
-                const url = 'https://lifeeiq.pythonanywhere.com/get_data?v=' + Math.random();
-                const res = await fetch(url);
-                const data = await res.json();
-                
-                document.getElementById('balance').innerText = 
-                    data.balance.toLocaleString() + ' ₽';
-                document.getElementById('hours').innerText = 
-                    data.hours + ' ч.';
-                document.getElementById('pending').innerText = 
-                    data.pending.toLocaleString() + ' ₽';
-                
-                const usernameEl = document.getElementById('username');
-                if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
-                    usernameEl.innerText = tg.initDataUnsafe.user.first_name.toUpperCase();
-                } else {
-                    usernameEl.innerText = "ADMIN";
-                }
-                
+                const shifts = getShifts();
+                const withdrawals = getWithdrawals();
+
+                // 1. Считаем статистику
+                let totalEarned = 0;
+                let totalHours = 0;
+                shifts.forEach(s => {
+                    totalEarned += s.earned;
+                    totalHours += s.hours;
+                });
+
+                let totalPending = 0;
+                let totalPaid = 0;
+                withdrawals.forEach(w => {
+                    if (w.status === 'pending') {
+                        totalPending += w.amount;
+                    } else if (w.status === 'paid') {
+                        totalPaid += w.amount;
+                    }
+                });
+
+                const availableBalance = totalEarned - totalPaid - totalPending;
+
+                // 2. Обновляем цифры на экране
+                document.getElementById('balance').innerText = availableBalance.toLocaleString() + ' ₽';
+                document.getElementById('hours').innerText = totalHours + ' ч.';
+                document.getElementById('pending').innerText = totalPending.toLocaleString() + ' ₽';
+                document.getElementById('username').innerText = tg.initDataUnsafe.user ? tg.initDataUnsafe.user.first_name.toUpperCase() : "ADMIN";
+
+                // 3. Объединяем и рендерим историю
                 const historyContainer = document.getElementById('history');
                 historyContainer.innerHTML = '';
-                
-                if (data.history && data.history.length > 0) {
-                    data.history.forEach(item => {
+
+                // Объединяем смены и выводы в один список
+                let combinedList = [];
+                shifts.forEach(s => {
+                    combinedList.push({
+                        id: s.id,
+                        type: 'shift',
+                        desc: s.desc,
+                        amount: s.earned,
+                        date: s.date,
+                        timestamp: s.timestamp
+                    });
+                });
+
+                withdrawals.forEach(w => {
+                    combinedList.push({
+                        id: w.id,
+                        type: 'withdrawal',
+                        desc: w.status === 'pending' ? 'Запрос вывода (ожидание)' : 'Выплата получена',
+                        amount: w.amount,
+                        status: w.status,
+                        date: w.date,
+                        timestamp: w.timestamp
+                    });
+                });
+
+                // Сортируем: новые сверху
+                combinedList.sort((a, b) => b.timestamp - a.timestamp);
+
+                if (combinedList.length > 0) {
+                    combinedList.forEach(item => {
                         const div = document.createElement('div');
                         div.className = 'history-item';
-                        div.innerHTML = `
-                            <div class="history-info">
-                                <span class="history-desc">${item.desc}</span>
-                                <span class="history-date">${item.date}</span>
-                            </div>
-                            <div class="history-amount">+${item.amount.toLocaleString()} ₽</div>
-                        `;
+                        
+                        if (item.type === 'shift') {
+                            // Отображение смены
+                            div.innerHTML = `
+                                <div class="history-info">
+                                    <span class="history-desc">${item.desc}</span>
+                                    <span class="history-date">${item.date}</span>
+                                </div>
+                                <div class="history-amount amount-plus">+${item.amount.toLocaleString()} ₽</div>
+                            `;
+                        } else {
+                            // Отображение вывода
+                            if (item.status === 'pending') {
+                                div.innerHTML = `
+                                    <div class="history-info">
+                                        <span class="history-desc" style="color:#fbbf24;">${item.desc}</span>
+                                        <span class="history-date">${item.date}</span>
+                                    </div>
+                                    <div class="history-amount">
+                                        <span class="amount-pending">-${item.amount.toLocaleString()} ₽</span>
+                                        <button class="btn-confirm" onclick="confirmWithdrawal(${item.id})">✅ Получил</button>
+                                    </div>
+                                `;
+                            } else {
+                                div.innerHTML = `
+                                    <div class="history-info">
+                                        <span class="history-desc" style="color:rgba(255,255,255,0.4);">${item.desc}</span>
+                                        <span class="history-date">${item.date}</span>
+                                    </div>
+                                    <div class="history-amount amount-minus">-${item.amount.toLocaleString()} ₽</div>
+                                `;
+                            }
+                        }
                         historyContainer.appendChild(div);
                     });
                 } else {
                     historyContainer.innerHTML = `
-                        <div style="text-align:center; color:rgba(255,255,255,0.2); font-size:13px; padding:20px;">
-                            Смен пока нет
+                        <div style="text-align:center; color:rgba(255,255,255,0.2); font-size:13px; padding:30px;">
+                            Истории пока нет
                         </div>
                     `;
                 }
@@ -328,99 +441,82 @@
             }
         }
 
-        async function addShift() {
+        // --- ДОБАВИТЬ СМЕНУ ---
+        function addShift() {
             const hours = prompt("⏱ Введите часы за смену:");
             const earned = prompt("💰 Сколько заработано (руб):");
             const desc = prompt("📍 Название объекта:");
             if (!hours || !earned || !desc) return;
 
-            tg.MainButton.setText("ОТПРАВКА...");
-            tg.MainButton.show();
+            const shifts = getShifts();
+            const newShift = {
+                id: Date.now(),
+                hours: parseFloat(hours),
+                earned: parseFloat(earned),
+                desc: desc,
+                date: new Date().toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }),
+                timestamp: Date.now()
+            };
 
-            try {
-                const response = await fetch('https://lifeeiq.pythonanywhere.com/add_shift', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        hours: parseFloat(hours),
-                        earned: parseFloat(earned),
-                        desc: desc,
-                        date: new Date().toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
-                    })
-                });
-                
-                const text = await response.text();
-                if (response.ok) {
-                    safeAlert("✅ Данные сохранены!");
-                    loadData();
-                } else {
-                    safeAlert("Ошибка сервера: " + text);
-                }
-            } catch (e) {
-                safeAlert("Ошибка сети: " + e.message);
-            } finally {
-                tg.MainButton.hide();
-            }
+            shifts.push(newShift);
+            saveShifts(shifts);
+            safeAlert("✅ Смена добавлена локально!");
+            loadData();
         }
 
-        async function requestWithdrawal() {
+        // --- ЗАПРОС ВЫВОДА ---
+        function requestWithdrawal() {
             const amount = prompt("💵 Какую сумму поставить на вывод?");
             if (!amount) return;
 
-            tg.MainButton.setText("ОТПРАВКА ЗАПРОСА...");
-            tg.MainButton.show();
+            const withdrawals = getWithdrawals();
+            const newWithdrawal = {
+                id: Date.now(),
+                amount: parseFloat(amount),
+                status: 'pending',
+                date: new Date().toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }),
+                timestamp: Date.now()
+            };
 
-            try {
-                const response = await fetch('https://lifeeiq.pythonanywhere.com/request_withdrawal', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        amount: parseFloat(amount),
-                        date: new Date().toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })
-                    })
-                });
-                
-                const text = await response.text();
-                if (response.ok) {
-                    safeAlert("⏳ Запрос отправлен!");
-                    loadData();
-                } else {
-                    safeAlert("Ошибка сервера: " + text);
-                }
-            } catch (e) {
-                safeAlert("Ошибка вывода: " + e.message);
-            } finally {
-                tg.MainButton.hide();
-            }
+            withdrawals.push(newWithdrawal);
+            saveWithdrawals(withdrawals);
+            safeAlert("⏳ Запрос создан! Сделай скриншот и отправь отцу.");
+            loadData();
         }
 
-        async function deleteLast() {
-            const confirmDelete = confirm("⚠️ Внимание! Удалить ПОСЛЕДНЮЮ запись смены?");
+        // --- ПОДТВЕРДИТЬ ПОЛУЧЕНИЕ ДЕНЕГ ---
+        function confirmWithdrawal(id) {
+            const withdrawals = getWithdrawals();
+            const updated = withdrawals.map(w => {
+                if (w.id === id) {
+                    w.status = 'paid';
+                }
+                return w;
+            });
+            saveWithdrawals(updated);
+            safeAlert("✅ Выплата подтверждена!");
+            loadData();
+        }
+
+        // --- УДАЛИТЬ ПОСЛЕДНЮЮ СМЕНУ ---
+        function deleteLastShift() {
+            const shifts = getShifts();
+            if (shifts.length === 0) {
+                safeAlert("У вас пока нет записанных смен.");
+                return;
+            }
+
+            const last = shifts[shifts.length - 1];
+            const confirmDelete = confirm(`⚠️ Внимание!\nУдалить последнюю смену:\n📍 ${last.desc} на сумму ${last.earned} ₽?`);
             if (!confirmDelete) return;
 
-            tg.MainButton.setText("УДАЛЯЮ...");
-            tg.MainButton.show();
-
-            try {
-                const response = await fetch('https://lifeeiq.pythonanywhere.com/delete_last', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'}
-                });
-                
-                const text = await response.text();
-                if (response.ok) {
-                    safeAlert("🗑 Последняя смена удалена!");
-                    loadData();
-                } else {
-                    safeAlert("Ошибка сервера при удалении: " + text);
-                }
-            } catch (e) {
-                safeAlert("Ошибка сети при удалении: " + e.message);
-            } finally {
-                tg.MainButton.hide();
-            }
+            shifts.pop(); // Удаляем последний элемент
+            saveShifts(shifts);
+            safeAlert("🗑 Последняя смена удалена!");
+            loadData();
         }
 
+        // Первоначальный запуск системы
         loadData();
     </script>
 </body>
